@@ -10,7 +10,10 @@
 # limitations under the License.
 
 from .contrastive import ContrastiveLoss
-from .deform import BendingEnergyLoss
+from .deform import (
+    BendingEnergyLoss,
+    MembraneEnergyLoss,
+)
 from .dice import (
     Dice,
     DiceCELoss,
@@ -28,7 +31,12 @@ from .dice import (
 )
 from .focal_loss import FocalLoss
 from .giou_loss import BoxGIoULoss, giou
-from .image_dissimilarity import GlobalMutualInformationLoss, LocalNormalizedCrossCorrelationLoss
+from .image_dissimilarity import (
+    GlobalMutualInformationLoss, 
+    LocalNormalizedCrossCorrelationLoss,
+    GlobalNormalizedCrossCorrelationLoss,
+    GlobalNormalisedMutualInformationLoss,
+)
 from .multi_scale import MultiScaleLoss
 from .spatial_mask import MaskedLoss
 from .ssim_loss import SSIMLoss

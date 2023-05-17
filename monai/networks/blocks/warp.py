@@ -31,7 +31,7 @@ class Warp(nn.Module):
     Warp an image with given dense displacement field (DDF).
     """
 
-    def __init__(self, mode=GridSampleMode.BILINEAR.value, padding_mode=GridSamplePadMode.BORDER.value):
+    def __init__(self, mode=GridSampleMode.BILINEAR.value, padding_mode=GridSamplePadMode.BORDER.value, jitter=False):
         """
         For pytorch native APIs, the possible values are:
 
@@ -46,10 +46,17 @@ class Warp(nn.Module):
             - padding_mode: ``"zeros"``, ``"border"``, ``"reflection"``, 0, 1, ...
 
         See also: :py:class:`monai.networks.layers.grid_pull`
-        """
-        super().__init__()
-        # resolves _interp_mode for different methods
 
+        - jitter: bool, default=False
+            Define reference grid on non-integer values, can improve convergence
+            Reference: B. Likar and F. Pernus. A heirarchical approach to elastic registration 
+            based on mutual information. Image and Vision Computing, 19:33-44, 2001.
+        """
+        super().__init__()        
+
+        self.jitter = jitter
+
+        # resolve _interp_mode for different methods
         if USE_COMPILED:
             if mode in (inter.value for inter in GridSampleMode):
                 mode = GridSampleMode(mode)
@@ -83,11 +90,16 @@ class Warp(nn.Module):
             self._padding_mode = GridSamplePadMode(padding_mode).value
 
     @staticmethod
-    def get_reference_grid(ddf: torch.Tensor) -> torch.Tensor:
+    def get_reference_grid(ddf: torch.Tensor, jitter: bool=False, seed: int=0) -> torch.Tensor:
         mesh_points = [torch.arange(0, dim) for dim in ddf.shape[2:]]
         grid = torch.stack(meshgrid_ij(*mesh_points), dim=0)  # (spatial_dims, ...)
         grid = torch.stack([grid] * ddf.shape[0], dim=0)  # (batch, spatial_dims, ...)
         grid = grid.to(ddf)
+        if jitter:
+            # Define reference grid on non-integer values
+            with torch.random.fork_rng(enabled=seed):        
+                torch.random.manual_seed(seed)
+                grid += torch.rand_like(grid)
         return grid
 
     def forward(self, image: torch.Tensor, ddf: torch.Tensor):
@@ -107,7 +119,7 @@ class Warp(nn.Module):
             raise ValueError(
                 f"Given input {spatial_dims}-d image shape {image.shape}, " f"the input DDF shape must be {ddf_shape}."
             )
-        grid = self.get_reference_grid(ddf) + ddf
+        grid = self.get_reference_grid(ddf, jitter=self.jitter) + ddf
         grid = grid.permute([0] + list(range(2, 2 + spatial_dims)) + [1])  # (batch, ..., spatial_dims)
 
         if not USE_COMPILED:  # pytorch native grid_sample
@@ -134,13 +146,15 @@ class DVF2DDF(nn.Module):
     """
 
     def __init__(
-        self, num_steps: int = 7, mode=GridSampleMode.BILINEAR.value, padding_mode=GridSamplePadMode.ZEROS.value
+        self, num_steps: int = 7, mode=GridSampleMode.BILINEAR.value, 
+        padding_mode=GridSamplePadMode.ZEROS.value, jitter=False,
     ):
         super().__init__()
         if num_steps <= 0:
             raise ValueError(f"expecting positive num_steps, got {num_steps}")
         self.num_steps = num_steps
-        self.warp_layer = Warp(mode=mode, padding_mode=padding_mode)
+        self.jitter = jitter
+        self.warp_layer = Warp(mode=mode, padding_mode=padding_mode, jitter=self.jitter)
 
     def forward(self, dvf):
         """
